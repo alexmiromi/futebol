@@ -150,7 +150,7 @@ input:focus, select:focus, textarea:focus { border-color: var(--highlight); }
     </header>
 
     <div class="tabs" id="tabs-bar">
-      <button class="tab active" data-tab="jogadores">Jogadores</button>
+      <button class="tab active" data-tab="jogadores">Jogadores <span id="players-count" class="counter">0</span></button>
       <button class="tab" data-tab="confirmados">Confirmados <span id="confirmed-count" class="counter">0</span></button>
       <button class="tab" data-tab="times">Times</button>
       <button class="tab" data-tab="config">Config</button>
@@ -660,6 +660,7 @@ function renderConfirmed() {
 }
 
 function updateConfirmedCount() {
+  document.getElementById('players-count').textContent = players.length;
   document.getElementById('confirmed-count').textContent = players.filter(p => p.confirmed).length;
 }
 
