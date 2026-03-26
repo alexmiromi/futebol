@@ -256,6 +256,82 @@ function supa(path, opts = {}) {
   }).then(r => r.json());
 }
 
+// ---- SUPABASE REALTIME ----
+let realtimeWs = null;
+let realtimeRef = 0;
+let heartbeatInterval = null;
+
+function startRealtime() {
+  if (realtimeWs) { try { realtimeWs.close(); } catch(e){} }
+  clearInterval(heartbeatInterval);
+
+  const wsUrl = SUPA_URL.replace('https://', 'wss://') + '/realtime/v1/websocket?apikey=' + SUPA_KEY + '&vsn=1.0.0';
+  realtimeWs = new WebSocket(wsUrl);
+
+  realtimeWs.onopen = () => {
+    // Join players channel
+    realtimeWs.send(JSON.stringify({
+      topic: 'realtime:public:players',
+      event: 'phx_join',
+      payload: { config: { broadcast: { self: false }, presence: { key: '' }, postgres_changes: [
+        { event: '*', schema: 'public', table: 'players' }
+      ]}},
+      ref: String(++realtimeRef)
+    }));
+    // Join config channel
+    realtimeWs.send(JSON.stringify({
+      topic: 'realtime:public:config',
+      event: 'phx_join',
+      payload: { config: { broadcast: { self: false }, presence: { key: '' }, postgres_changes: [
+        { event: '*', schema: 'public', table: 'config' }
+      ]}},
+      ref: String(++realtimeRef)
+    }));
+    // Heartbeat every 30s
+    heartbeatInterval = setInterval(() => {
+      if (realtimeWs.readyState === WebSocket.OPEN) {
+        realtimeWs.send(JSON.stringify({ topic: 'phoenix', event: 'heartbeat', payload: {}, ref: String(++realtimeRef) }));
+      }
+    }, 30000);
+  };
+
+  realtimeWs.onmessage = (evt) => {
+    try {
+      const msg = JSON.parse(evt.data);
+      if (msg.event === 'postgres_changes') {
+        // Data changed — reload everything
+        reloadAll();
+      }
+    } catch(e) {}
+  };
+
+  realtimeWs.onclose = () => {
+    clearInterval(heartbeatInterval);
+    // Reconnect after 2s
+    setTimeout(() => { if (role) startRealtime(); }, 2000);
+  };
+
+  realtimeWs.onerror = () => {
+    try { realtimeWs.close(); } catch(e) {}
+  };
+}
+
+let reloadDebounce = null;
+async function reloadAll() {
+  clearTimeout(reloadDebounce);
+  reloadDebounce = setTimeout(async () => {
+    const [p, c] = await Promise.all([
+      supa('players?select=*&order=name.asc'),
+      supa('config?select=num_teams,per_team,pos_limits,weights&id=eq.1')
+    ]);
+    players = p || [];
+    config = (c && c[0]) || config;
+    renderPlayers(document.getElementById('search-input')?.value || '');
+    renderConfirmed();
+    initConfig();
+  }, 300);
+}
+
 // ---- CONSTANTS ----
 const POSITIONS = ['Goleiro','Zagueiro','Lateral Esquerdo','Lateral Direito','Volante','Meia','Atacante','Ponta'];
 const POS_ABBR = {'Goleiro':'GOL','Zagueiro':'ZAG','Lateral Esquerdo':'LAT-E','Lateral Direito':'LAT-D','Volante':'VOL','Meia':'MEI','Atacante':'ATA','Ponta':'PON','Linha':'LIN','BANCO':'BANCO'};
@@ -312,11 +388,14 @@ async function checkPin() {
   document.getElementById('main-app').style.display = 'block';
   setupRole();
   loadData();
+  startRealtime();
 }
 
 function logout() {
   role = null;
   lastTeams = null;
+  if (realtimeWs) { try { realtimeWs.close(); } catch(e){} realtimeWs = null; }
+  clearInterval(heartbeatInterval);
   document.getElementById('main-app').style.display = 'none';
   document.getElementById('pin-screen').style.display = 'flex';
   document.getElementById('pin-error').textContent = '';
@@ -375,10 +454,7 @@ function setupRole() {
       <button class="btn btn-secondary" onclick="generateTeams()" id="btn-reshuffle" style="display:none;margin-bottom:8px">Sortear Novamente</button>
       <button class="btn btn-danger" onclick="clearTeams()" id="btn-clear" style="display:none;margin-bottom:14px">Limpar Times</button>`;
   } else {
-    // confirm role: only confirm/deconfirm buttons
-    confirmBar.innerHTML = `
-      <button class="btn btn-small btn-secondary" onclick="confirmAll()">Confirmar Todos</button>
-      <button class="btn btn-small btn-outline" onclick="unconfirmAll()">Desmarcar Todos</button>`;
+    // confirm role: no bulk actions, only individual confirm
     timesActions.innerHTML = `<p style="color:var(--muted);font-size:0.85rem;margin-bottom:14px">Somente visualizacao dos times.</p>`;
   }
 }
