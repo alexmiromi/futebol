@@ -597,7 +597,7 @@ function renderPlayers(filter = '') {
         <div class="player-name">${esc(p.name)}</div>
         <div class="player-meta">${esc(posStr)}${p.phone ? ' | ' + esc(p.phone) : ''}</div>
       </div>
-      <span class="player-overall">${ovr}</span>
+      ${role !== 'confirm' ? `<span class="player-overall">${ovr}</span>` : ''}
       <div class="player-actions">${actionBtns}</div>
     </div>`;
   }).join('');
@@ -655,7 +655,7 @@ function renderConfirmed() {
       <div class="player-avatar">${initials}</div>
       <div class="player-info">
         <div class="player-name">${esc(p.name)}</div>
-        <div class="player-meta">${esc(posStr)} | OVR ${ovr}</div>
+        <div class="player-meta">${esc(posStr)}${role !== 'confirm' ? ' | OVR ' + ovr : ''}</div>
       </div>
       <div class="player-actions">${actionBtns}</div>
     </div>`;
@@ -1058,13 +1058,14 @@ function renderTeams(teams) {
     const total = starters.reduce((s, p) => s + p.ovr, 0);
     let playersHtml = starters.map(p => {
       const abbr = POS_ABBR[p.assignedPos] || p.assignedPos;
-      return `<div class="team-player"><span><span class="team-player-pos">${esc(abbr)}</span> ${esc(p.name)}</span><span class="team-player-rating">${p.ovr}</span></div>`;
+      return `<div class="team-player"><span><span class="team-player-pos">${esc(abbr)}</span> ${esc(p.name)}</span>${role !== 'confirm' ? `<span class="team-player-rating">${p.ovr}</span>` : ''}</div>`;
     }).join('');
     if (bench.length > 0) {
       playersHtml += `<hr class="team-separator">`;
-      playersHtml += bench.map(p => `<div class="team-player bench"><span><span class="team-player-pos">BANCO</span> ${esc(p.name)}</span><span class="team-player-rating">${p.ovr}</span></div>`).join('');
+      playersHtml += bench.map(p => `<div class="team-player bench"><span><span class="team-player-pos">BANCO</span> ${esc(p.name)}</span>${role !== 'confirm' ? `<span class="team-player-rating">${p.ovr}</span>` : ''}</div>`).join('');
     }
-    return `<div class="team-block" style="border-left:4px solid ${TEAM_COLORS[idx]}"><div class="team-header"><span class="team-title" style="color:${TEAM_COLORS[idx]}">Time ${TEAM_NAMES[idx]}</span><span class="team-overall">${starters.length} tit | Total ${total}</span></div>${playersHtml}</div>`;
+    const headerInfo = role !== 'confirm' ? `${starters.length} tit | Total ${total}` : `${starters.length} titulares`;
+    return `<div class="team-block" style="border-left:4px solid ${TEAM_COLORS[idx]}"><div class="team-header"><span class="team-title" style="color:${TEAM_COLORS[idx]}">Time ${TEAM_NAMES[idx]}</span><span class="team-overall">${headerInfo}</span></div>${playersHtml}</div>`;
   }).join('');
   display.innerHTML = html;
   const reshuffle = document.getElementById('btn-reshuffle');
