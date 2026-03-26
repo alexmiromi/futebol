@@ -287,6 +287,15 @@ function startRealtime() {
       ]}},
       ref: String(++realtimeRef)
     }));
+    // Join teams_state channel
+    realtimeWs.send(JSON.stringify({
+      topic: 'realtime:public:teams_state',
+      event: 'phx_join',
+      payload: { config: { broadcast: { self: false }, presence: { key: '' }, postgres_changes: [
+        { event: '*', schema: 'public', table: 'teams_state' }
+      ]}},
+      ref: String(++realtimeRef)
+    }));
     // Heartbeat every 30s
     heartbeatInterval = setInterval(() => {
       if (realtimeWs.readyState === WebSocket.OPEN) {
@@ -320,15 +329,30 @@ let reloadDebounce = null;
 async function reloadAll() {
   clearTimeout(reloadDebounce);
   reloadDebounce = setTimeout(async () => {
-    const [p, c] = await Promise.all([
+    const [p, c, ts] = await Promise.all([
       supa('players?select=*&order=name.asc'),
-      supa('config?select=num_teams,per_team,pos_limits,weights&id=eq.1')
+      supa('config?select=num_teams,per_team,pos_limits,weights&id=eq.1'),
+      supa('teams_state?select=teams_json&id=eq.1')
     ]);
     players = p || [];
     config = (c && c[0]) || config;
     renderPlayers(document.getElementById('search-input')?.value || '');
     renderConfirmed();
     initConfig();
+    // Update teams display from DB
+    const teamsData = (ts && ts[0]) ? ts[0].teams_json : null;
+    if (teamsData) {
+      lastTeams = teamsData;
+      renderTeams(teamsData);
+    } else {
+      lastTeams = null;
+      document.getElementById('teams-display').innerHTML = '';
+      document.getElementById('btn-copy').style.display = 'none';
+      const reshuffle = document.getElementById('btn-reshuffle');
+      const clear = document.getElementById('btn-clear');
+      if (reshuffle) reshuffle.style.display = 'none';
+      if (clear) clear.style.display = 'none';
+    }
   }, 300);
 }
 
@@ -461,25 +485,37 @@ function setupRole() {
 
 // ---- DATA LOADING ----
 async function loadData() {
-  const [p, c] = await Promise.all([
+  const [p, c, ts] = await Promise.all([
     supa('players?select=*&order=name.asc'),
-    supa('config?select=num_teams,per_team,pos_limits,weights&id=eq.1')
+    supa('config?select=num_teams,per_team,pos_limits,weights&id=eq.1'),
+    supa('teams_state?select=teams_json&id=eq.1')
   ]);
   players = p || [];
   config = (c && c[0]) || {num_teams:2, per_team:7, pos_limits:{}, weights:{}};
 
-  // Reset teams on load
-  lastTeams = null;
-  document.getElementById('teams-display').innerHTML = '';
-  document.getElementById('btn-copy').style.display = 'none';
-  const reshuffle = document.getElementById('btn-reshuffle');
-  const clear = document.getElementById('btn-clear');
-  if (reshuffle) reshuffle.style.display = 'none';
-  if (clear) clear.style.display = 'none';
+  // Load teams from DB (shared state)
+  const teamsData = (ts && ts[0]) ? ts[0].teams_json : null;
+  if (teamsData) {
+    lastTeams = teamsData;
+  } else {
+    lastTeams = null;
+  }
 
   renderPlayers();
   renderConfirmed();
   initConfig();
+
+  // Render teams if they exist
+  if (lastTeams) {
+    renderTeams(lastTeams);
+  } else {
+    document.getElementById('teams-display').innerHTML = '';
+    document.getElementById('btn-copy').style.display = 'none';
+    const reshuffle = document.getElementById('btn-reshuffle');
+    const clear = document.getElementById('btn-clear');
+    if (reshuffle) reshuffle.style.display = 'none';
+    if (clear) clear.style.display = 'none';
+  }
 }
 
 // ---- OVERALL ----
@@ -554,7 +590,38 @@ function renderConfirmed() {
     list.innerHTML = `<div class="empty"><p>Nenhum jogador confirmado.<br>Confirme na aba Jogadores.</p></div>`;
     return;
   }
-  list.innerHTML = confirmed.map(p => {
+
+  // Check missing positions
+  const numTeams = config.num_teams || 2;
+  const posLimits = config.pos_limits || {};
+  const posCounts = {};
+  confirmed.forEach(p => {
+    const positions = Array.isArray(p.positions) ? p.positions : [];
+    positions.forEach(pos => { posCounts[pos] = (posCounts[pos] || 0) + 1; });
+  });
+
+  let alertHtml = '';
+  // Goleiro is mandatory: always need exactly numTeams goleiros
+  const goleiros = posCounts['Goleiro'] || 0;
+  if (goleiros < numTeams) {
+    alertHtml += `<div style="background:#5a1a2a;border-radius:var(--radius);padding:12px;margin-bottom:12px;font-size:0.85rem;font-weight:700;color:var(--highlight)">FALTAM ${numTeams - goleiros} GOLEIRO${numTeams - goleiros > 1 ? 'S' : ''}! (${goleiros}/${numTeams} confirmados)</div>`;
+  }
+
+  // Check other positions - informational
+  const missing = [];
+  POSITIONS.forEach(pos => {
+    if (pos === 'Goleiro') return;
+    const need = (posLimits[pos] || 0) * numTeams;
+    const have = posCounts[pos] || 0;
+    if (need > 0 && have < numTeams) {
+      missing.push(`${POS_ABBR[pos] || pos}: ${have}/${numTeams}`);
+    }
+  });
+  if (missing.length > 0) {
+    alertHtml += `<div style="background:var(--accent);border-radius:var(--radius);padding:10px;margin-bottom:12px;font-size:0.8rem;color:#f39c12">Posicoes com poucos jogadores: ${missing.join(' | ')}</div>`;
+  }
+
+  let cardsHtml = confirmed.map(p => {
     const initials = p.name.split(' ').map(w => w[0]).join('').slice(0,2).toUpperCase();
     const ovr = calcOverall(p);
     const positions = Array.isArray(p.positions) ? p.positions : [];
@@ -572,6 +639,8 @@ function renderConfirmed() {
       <div class="player-actions">${actionBtns}</div>
     </div>`;
   }).join('');
+
+  list.innerHTML = alertHtml + cardsHtml;
   updateConfirmedCount();
 }
 
@@ -920,14 +989,19 @@ function generateTeams() {
 
   lastTeams = teams;
   renderTeams(teams);
+  // Save to DB so all devices see it
+  supa('teams_state?id=eq.1', { method: 'PATCH', body: { teams_json: teams, updated_at: new Date().toISOString() } });
 }
 
-function clearTeams() {
+async function clearTeams() {
   lastTeams = null;
   document.getElementById('teams-display').innerHTML = '<div class="empty"><p>Times limpos. Sorteie novamente.</p></div>';
   document.getElementById('btn-copy').style.display = 'none';
-  document.getElementById('btn-reshuffle').style.display = 'none';
-  document.getElementById('btn-clear').style.display = 'none';
+  const reshuffle = document.getElementById('btn-reshuffle');
+  const clear = document.getElementById('btn-clear');
+  if (reshuffle) reshuffle.style.display = 'none';
+  if (clear) clear.style.display = 'none';
+  await supa('teams_state?id=eq.1', { method: 'PATCH', body: { teams_json: null, updated_at: new Date().toISOString() } });
 }
 
 function renderTeams(teams) {
