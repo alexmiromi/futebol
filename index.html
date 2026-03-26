@@ -586,8 +586,8 @@ function renderPlayers(filter = '') {
     }
 
     return `<div class="player-card ${p.confirmed ? 'confirmed' : ''}">
-      <div class="player-avatar">${initials}</div>
-      <div class="player-info">
+      <div class="player-avatar" onclick="toggleConfirm('${p.id}')" style="cursor:pointer">${initials}</div>
+      <div class="player-info" onclick="toggleConfirm('${p.id}')" style="cursor:pointer">
         <div class="player-name">${esc(p.name)}</div>
         <div class="player-meta">${esc(posStr)}${p.phone ? ' | ' + esc(p.phone) : ''}</div>
       </div>
