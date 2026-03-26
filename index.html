@@ -104,6 +104,9 @@ input:focus, select:focus, textarea:focus { border-color: var(--highlight); }
 .tab.highlight { animation: tabPulse 1s ease-in-out infinite; position: relative; }
 .tab.highlight::after { content: '!'; position: absolute; top: 2px; right: 4px; background: var(--highlight); color: #fff; font-size: 0.6rem; font-weight: 800; width: 14px; height: 14px; border-radius: 50%; display: flex; align-items: center; justify-content: center; }
 @keyframes tabPulse { 0%,100% { background: var(--accent); } 50% { background: var(--highlight); color: #fff; } }
+.teams-banner { background: linear-gradient(135deg, var(--green), #1a8a4a); border-radius: var(--radius); padding: 14px 16px; margin-bottom: 14px; text-align: center; }
+.teams-banner-title { font-weight: 800; font-size: 1rem; color: #fff; }
+.teams-banner-time { font-size: 0.8rem; color: rgba(255,255,255,0.8); margin-top: 4px; }
 
 /* PIN screen */
 .pin-screen { display: flex; flex-direction: column; align-items: center; justify-content: center; min-height: 80vh; gap: 20px; }
@@ -335,7 +338,7 @@ async function reloadAll() {
     const [p, c, ts] = await Promise.all([
       supa('players?select=*&order=name.asc'),
       supa('config?select=num_teams,per_team,pos_limits,weights&id=eq.1'),
-      supa('teams_state?select=teams_json&id=eq.1')
+      supa('teams_state?select=teams_json,updated_at&id=eq.1')
     ]);
     players = p || [];
     config = (c && c[0]) || config;
@@ -344,6 +347,7 @@ async function reloadAll() {
     initConfig();
     // Update teams display from DB
     const teamsData = (ts && ts[0]) ? ts[0].teams_json : null;
+    lastTeamsTime = (ts && ts[0]) ? ts[0].updated_at : null;
     const hadTeams = !!lastTeams;
     const hasTeams = !!teamsData;
 
@@ -388,6 +392,7 @@ let config = {};
 let role = null; // 'admin', 'editor', 'confirm'
 let editingId = null;
 let lastTeams = null;
+let lastTeamsTime = null;
 
 // ---- PIN AUTH ----
 const pinDigits = document.querySelectorAll('.pin-digit');
@@ -502,13 +507,14 @@ async function loadData() {
   const [p, c, ts] = await Promise.all([
     supa('players?select=*&order=name.asc'),
     supa('config?select=num_teams,per_team,pos_limits,weights&id=eq.1'),
-    supa('teams_state?select=teams_json&id=eq.1')
+    supa('teams_state?select=teams_json,updated_at&id=eq.1')
   ]);
   players = p || [];
   config = (c && c[0]) || {num_teams:2, per_team:7, pos_limits:{}, weights:{}};
 
   // Load teams from DB (shared state)
   const teamsData = (ts && ts[0]) ? ts[0].teams_json : null;
+  lastTeamsTime = (ts && ts[0]) ? ts[0].updated_at : null;
   if (teamsData) {
     lastTeams = teamsData;
   } else {
@@ -1004,10 +1010,11 @@ function generateTeams() {
   });
 
   lastTeams = teams;
+  lastTeamsTime = new Date().toISOString();
   renderTeams(teams);
   showToast('Times sorteados!');
   // Save to DB so all devices see it
-  supa('teams_state?id=eq.1', { method: 'PATCH', body: { teams_json: teams, updated_at: new Date().toISOString() } });
+  supa('teams_state?id=eq.1', { method: 'PATCH', body: { teams_json: teams, updated_at: lastTeamsTime } });
 }
 
 async function clearTeams() {
@@ -1034,9 +1041,18 @@ function removeTimesHighlight() {
   if (timesTab) timesTab.classList.remove('highlight');
 }
 
+function formatDateTime(iso) {
+  if (!iso) return '';
+  const d = new Date(iso);
+  const pad = n => String(n).padStart(2, '0');
+  return `${pad(d.getDate())}/${pad(d.getMonth()+1)}/${d.getFullYear()} ${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
+}
+
 function renderTeams(teams) {
   const display = document.getElementById('teams-display');
-  let html = teams.map((team, idx) => {
+  const timeStr = formatDateTime(lastTeamsTime);
+  let html = `<div class="teams-banner"><div class="teams-banner-title">TIMES FORMADOS</div><div class="teams-banner-time">${timeStr}</div></div>`;
+  html += teams.map((team, idx) => {
     const starters = team.filter(p => !p.isBench);
     const bench = team.filter(p => p.isBench);
     const total = starters.reduce((s, p) => s + p.ovr, 0);
