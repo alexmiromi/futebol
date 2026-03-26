@@ -101,6 +101,9 @@ input:focus, select:focus, textarea:focus { border-color: var(--highlight); }
 .modal-handle { width: 40px; height: 4px; background: var(--accent); border-radius: 4px; margin: 0 auto 16px; }
 .modal h2 { font-size: 1.1rem; margin-bottom: 16px; }
 .confirm-bar { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 12px; }
+.tab.highlight { animation: tabPulse 1s ease-in-out infinite; position: relative; }
+.tab.highlight::after { content: '!'; position: absolute; top: 2px; right: 4px; background: var(--highlight); color: #fff; font-size: 0.6rem; font-weight: 800; width: 14px; height: 14px; border-radius: 50%; display: flex; align-items: center; justify-content: center; }
+@keyframes tabPulse { 0%,100% { background: var(--accent); } 50% { background: var(--highlight); color: #fff; } }
 
 /* PIN screen */
 .pin-screen { display: flex; flex-direction: column; align-items: center; justify-content: center; min-height: 80vh; gap: 20px; }
@@ -341,10 +344,20 @@ async function reloadAll() {
     initConfig();
     // Update teams display from DB
     const teamsData = (ts && ts[0]) ? ts[0].teams_json : null;
+    const hadTeams = !!lastTeams;
+    const hasTeams = !!teamsData;
+
     if (teamsData) {
       lastTeams = teamsData;
       renderTeams(teamsData);
+      // Alert if teams were just sorted (didn't have before, or changed)
+      if (!hadTeams && hasTeams) {
+        notifyTeamsSorted();
+      }
     } else {
+      if (hadTeams) {
+        showToast('Times foram limpos');
+      }
       lastTeams = null;
       document.getElementById('teams-display').innerHTML = '';
       document.getElementById('btn-copy').style.display = 'none';
@@ -352,6 +365,7 @@ async function reloadAll() {
       const clear = document.getElementById('btn-clear');
       if (reshuffle) reshuffle.style.display = 'none';
       if (clear) clear.style.display = 'none';
+      removeTimesHighlight();
     }
   }, 300);
 }
@@ -545,6 +559,7 @@ document.querySelectorAll('.tab').forEach(t => {
     document.getElementById('panel-' + t.dataset.tab).classList.add('active');
     if (t.dataset.tab === 'confirmados') renderConfirmed();
     if (t.dataset.tab === 'jogadores') renderPlayers();
+    if (t.dataset.tab === 'times') removeTimesHighlight();
   });
 });
 
@@ -989,6 +1004,7 @@ function generateTeams() {
 
   lastTeams = teams;
   renderTeams(teams);
+  showToast('Times sorteados!');
   // Save to DB so all devices see it
   supa('teams_state?id=eq.1', { method: 'PATCH', body: { teams_json: teams, updated_at: new Date().toISOString() } });
 }
@@ -1002,6 +1018,19 @@ async function clearTeams() {
   if (reshuffle) reshuffle.style.display = 'none';
   if (clear) clear.style.display = 'none';
   await supa('teams_state?id=eq.1', { method: 'PATCH', body: { teams_json: null, updated_at: new Date().toISOString() } });
+}
+
+function notifyTeamsSorted() {
+  showToast('Times sorteados!');
+  const timesTab = document.querySelector('[data-tab="times"]');
+  if (timesTab && !timesTab.classList.contains('active')) {
+    timesTab.classList.add('highlight');
+  }
+}
+
+function removeTimesHighlight() {
+  const timesTab = document.querySelector('[data-tab="times"]');
+  if (timesTab) timesTab.classList.remove('highlight');
 }
 
 function renderTeams(teams) {
