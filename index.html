@@ -499,7 +499,9 @@ function setupRole() {
       <button class="btn btn-secondary" onclick="generateTeams()" id="btn-reshuffle" style="display:none;margin-bottom:8px">Sortear Novamente</button>
       <button class="btn btn-danger" onclick="clearTeams()" id="btn-clear" style="display:none;margin-bottom:14px">Limpar Times</button>`;
   } else {
-    // confirm role: no bulk actions, only individual confirm
+    // confirm role: can add players (limited), no bulk actions
+    jogActions.innerHTML = `
+      <button class="btn btn-primary" onclick="openModal()">+ Cadastrar Jogador</button>`;
     timesActions.innerHTML = `<p style="color:var(--muted);font-size:0.85rem;margin-bottom:14px">Somente visualizacao dos times.</p>`;
   }
 }
@@ -674,11 +676,28 @@ function updateConfirmedCount() {
 
 // ---- MODAL ----
 function openModal(player = null) {
-  if (role !== 'admin' && role !== 'editor') return;
+  // Check confirm role limit: 4 new players per 24h
+  if (role === 'confirm' && !player) {
+    const regLog = JSON.parse(localStorage.getItem('fdg_confirm_regs') || '[]');
+    const now = Date.now();
+    const recent = regLog.filter(t => now - t < 24 * 60 * 60 * 1000);
+    if (recent.length >= 4) {
+      showToast('Limite de 4 cadastros em 24h atingido');
+      return;
+    }
+  }
+  // Confirm role cannot edit existing players
+  if (role === 'confirm' && player) return;
+
   editingId = player ? player.id : null;
   document.getElementById('modal-title').textContent = player ? 'Editar Jogador' : 'Cadastrar Jogador';
   document.getElementById('inp-name').value = player ? player.name : '';
+
+  // Phone: hide for confirm role
+  const phoneGroup = document.getElementById('inp-phone').closest('.form-group');
   document.getElementById('inp-phone').value = player ? (player.phone || '') : '';
+  phoneGroup.style.display = (role === 'confirm') ? 'none' : 'block';
+
   const positions = player ? (Array.isArray(player.positions) ? player.positions : []) : [];
   const grid = document.getElementById('pos-grid');
   grid.innerHTML = POSITIONS.map(pos =>
@@ -687,15 +706,27 @@ function openModal(player = null) {
   grid.querySelectorAll('.pos-chip').forEach(chip => {
     chip.addEventListener('click', () => chip.classList.toggle('selected'));
   });
+
+  // Skills: hide for confirm role
   const sf = document.getElementById('skills-form');
-  const sk = player ? getSkills(player) : {};
-  sf.innerHTML = SKILLS.map(s => {
-    const val = sk[s.key] || 5;
-    return `<div class="skill-row"><label>${s.label}</label><input type="range" min="1" max="10" value="${val}" data-skill="${s.key}"><span class="skill-val">${val}</span></div>`;
-  }).join('');
-  sf.querySelectorAll('input[type=range]').forEach(r => {
-    r.addEventListener('input', () => r.nextElementSibling.textContent = r.value);
-  });
+  const skillsHeader = sf.previousElementSibling;
+  if (role === 'confirm') {
+    sf.style.display = 'none';
+    skillsHeader.style.display = 'none';
+    sf.innerHTML = '';
+  } else {
+    sf.style.display = 'block';
+    skillsHeader.style.display = 'block';
+    const sk = player ? getSkills(player) : {};
+    sf.innerHTML = SKILLS.map(s => {
+      const val = sk[s.key] || 5;
+      return `<div class="skill-row"><label>${s.label}</label><input type="range" min="1" max="10" value="${val}" data-skill="${s.key}"><span class="skill-val">${val}</span></div>`;
+    }).join('');
+    sf.querySelectorAll('input[type=range]').forEach(r => {
+      r.addEventListener('input', () => r.nextElementSibling.textContent = r.value);
+    });
+  }
+
   document.getElementById('modal').classList.add('show');
   setTimeout(() => document.getElementById('inp-name').focus(), 100);
 }
@@ -705,24 +736,33 @@ function closeModal() { document.getElementById('modal').classList.remove('show'
 async function savePlayer() {
   const name = document.getElementById('inp-name').value.trim();
   if (!name) { document.getElementById('inp-name').focus(); return; }
-  const phone = document.getElementById('inp-phone').value.trim();
+  const phone = (role === 'confirm') ? '' : document.getElementById('inp-phone').value.trim();
   const positions = [...document.querySelectorAll('#pos-grid .pos-chip.selected')].map(c => c.dataset.pos);
   const skills = {};
-  document.querySelectorAll('#skills-form input[type=range]').forEach(r => {
-    skills[r.dataset.skill] = parseInt(r.value);
-  });
+  if (role !== 'confirm') {
+    document.querySelectorAll('#skills-form input[type=range]').forEach(r => {
+      skills[r.dataset.skill] = parseInt(r.value);
+    });
+  } else {
+    // Default skills for confirm role
+    SKILLS.forEach(s => { skills[s.key] = 5; });
+  }
 
   if (editingId) {
-    await supa('players?id=eq.' + editingId, {
-      method: 'PATCH',
-      body: { name, phone, positions, skills }
-    });
+    const body = (role === 'confirm') ? { name, positions } : { name, phone, positions, skills };
+    await supa('players?id=eq.' + editingId, { method: 'PATCH', body });
   } else {
     const id = Date.now().toString(36) + Math.random().toString(36).slice(2,6);
     await supa('players', {
       method: 'POST',
       body: { id, name, phone, positions, skills, confirmed: false }
     });
+    // Track confirm role registration limit
+    if (role === 'confirm') {
+      const regLog = JSON.parse(localStorage.getItem('fdg_confirm_regs') || '[]');
+      regLog.push(Date.now());
+      localStorage.setItem('fdg_confirm_regs', JSON.stringify(regLog));
+    }
   }
   closeModal();
   await reloadPlayers();
