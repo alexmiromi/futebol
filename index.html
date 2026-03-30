@@ -493,7 +493,7 @@ function setupRole() {
       <button class="btn btn-secondary" onclick="openImportModal()" style="margin-top:6px">Importar Jogadores</button>`;
     confirmBar.innerHTML = `
       <button class="btn btn-small btn-secondary" onclick="confirmAll()">Confirmar Todos</button>
-      <button class="btn btn-small btn-outline" onclick="unconfirmAll()">Desmarcar Todos</button>`;
+      ${role === 'admin' ? '<button class="btn btn-small btn-outline" onclick="unconfirmAll()">Desmarcar Todos</button>' : ''}`;
     timesActions.innerHTML = `
       <button class="btn btn-primary" onclick="generateTeams()" style="margin-bottom:8px">Sortear Times</button>
       <button class="btn btn-secondary" onclick="generateTeams()" id="btn-reshuffle" style="display:none;margin-bottom:8px">Sortear Novamente</button>
@@ -599,7 +599,7 @@ function renderPlayers(filter = '') {
       <div class="player-avatar" onclick="toggleConfirm('${p.id}')" style="cursor:pointer">${initials}</div>
       <div class="player-info" onclick="toggleConfirm('${p.id}')" style="cursor:pointer">
         <div class="player-name">${esc(p.name)}</div>
-        <div class="player-meta">${esc(posStr)}${p.phone ? ' | ' + esc(p.phone) : ''}</div>
+        <div class="player-meta">${esc(posStr)}${p.phone ? ' | ' + esc(p.phone) : ''}${p.confirmed && p.confirmed_at ? ' | ' + formatConfirmedAt(p.confirmed_at) : ''}</div>
       </div>
       ${role !== 'confirm' ? `<span class="player-overall">${ovr}</span>` : ''}
       <div class="player-actions">${actionBtns}</div>
@@ -651,15 +651,16 @@ function renderConfirmed() {
     const ovr = calcOverall(p);
     const positions = Array.isArray(p.positions) ? p.positions : [];
     const posStr = positions.map(x => POS_ABBR[x] || x).join(', ');
+    const confirmTime = p.confirmed_at ? formatConfirmedAt(p.confirmed_at) : '';
     let actionBtns = `<button class="icon-btn confirm confirmed" onclick="toggleConfirm('${p.id}')">&#10003;</button>`;
     if (role === 'admin' || role === 'editor') {
       actionBtns += `<button class="icon-btn edit" onclick="editPlayer('${p.id}')">&#9998;</button>`;
     }
     return `<div class="player-card confirmed">
-      <div class="player-avatar">${initials}</div>
-      <div class="player-info">
+      <div class="player-avatar" onclick="toggleConfirm('${p.id}')" style="cursor:pointer">${initials}</div>
+      <div class="player-info" onclick="toggleConfirm('${p.id}')" style="cursor:pointer">
         <div class="player-name">${esc(p.name)}</div>
-        <div class="player-meta">${esc(posStr)}${role !== 'confirm' ? ' | OVR ' + ovr : ''}</div>
+        <div class="player-meta">${esc(posStr)}${role !== 'confirm' ? ' | OVR ' + ovr : ''}${confirmTime ? ' | ' + confirmTime : ''}</div>
       </div>
       <div class="player-actions">${actionBtns}</div>
     </div>`;
@@ -784,20 +785,34 @@ async function deletePlayer(id) {
 async function toggleConfirm(id) {
   const p = players.find(x => x.id === id);
   if (!p) return;
-  await supa('players?id=eq.' + id, {
-    method: 'PATCH',
-    body: { confirmed: !p.confirmed }
-  });
+  const nowConfirming = !p.confirmed;
+  const body = { confirmed: nowConfirming };
+  // Only set confirmed_at when confirming AND there's no existing timestamp
+  // (prevents 0000 users from resetting the time by toggling)
+  if (nowConfirming && !p.confirmed_at) {
+    body.confirmed_at = new Date().toISOString();
+  }
+  // When unconfirming, keep confirmed_at (only admin "Desmarcar Todos" clears it)
+  await supa('players?id=eq.' + id, { method: 'PATCH', body });
   await reloadPlayers();
 }
 
 async function confirmAll() {
-  await supa('players?confirmed=eq.false', { method: 'PATCH', body: { confirmed: true } });
+  // Set confirmed_at only for those who don't have one yet
+  const toConfirm = players.filter(p => !p.confirmed);
+  const now = new Date().toISOString();
+  for (const p of toConfirm) {
+    const body = { confirmed: true };
+    if (!p.confirmed_at) body.confirmed_at = now;
+    await supa('players?id=eq.' + p.id, { method: 'PATCH', body });
+  }
   await reloadPlayers();
 }
 
 async function unconfirmAll() {
-  await supa('players?confirmed=eq.true', { method: 'PATCH', body: { confirmed: false } });
+  if (role !== 'admin') { showToast('Somente admin pode desmarcar todos'); return; }
+  // Admin clears everything: confirmed + confirmed_at
+  await supa('players?confirmed=eq.true', { method: 'PATCH', body: { confirmed: false, confirmed_at: null } });
   await reloadPlayers();
 }
 
@@ -1088,6 +1103,15 @@ function formatDateTime(iso) {
   const d = new Date(iso);
   const pad = n => String(n).padStart(2, '0');
   return `${pad(d.getDate())}/${pad(d.getMonth()+1)}/${d.getFullYear()} ${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
+}
+
+const DIAS_SEMANA = ['dom','seg','ter','qua','qui','sex','sab'];
+function formatConfirmedAt(iso) {
+  if (!iso) return '';
+  const d = new Date(iso);
+  const dia = DIAS_SEMANA[d.getDay()];
+  const pad = n => String(n).padStart(2, '0');
+  return `${dia} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
 }
 
 function renderTeams(teams) {
