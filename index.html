@@ -1196,7 +1196,18 @@ function generateTeams() {
   POSITIONS.forEach(pos => {
     const limit = posLimits[pos] || 0;
     if (limit === 0) return;
-    const candidates = all.filter(p => !assigned.has(p.id) && p.positions.includes(pos)).sort((a, b) => b.ovr - a.ovr);
+
+    // For Goleiro: prioritize players who ONLY play goalkeeper,
+    // then multi-position players as fallback
+    let candidates;
+    if (pos === 'Goleiro') {
+      const onlyGK = all.filter(p => !assigned.has(p.id) && p.positions.includes(pos) && p.positions.length === 1).sort((a, b) => b.ovr - a.ovr);
+      const multiGK = all.filter(p => !assigned.has(p.id) && p.positions.includes(pos) && p.positions.length > 1).sort((a, b) => b.ovr - a.ovr);
+      candidates = [...onlyGK, ...multiGK];
+    } else {
+      candidates = all.filter(p => !assigned.has(p.id) && p.positions.includes(pos)).sort((a, b) => b.ovr - a.ovr);
+    }
+
     for (let round = 0; round < limit; round++) {
       const teamOrder = Array.from({length: numTeams}, (_, i) => i)
         .filter(ti => teamStarters(ti) < perTeam && posCount(ti, pos) <= round)
@@ -1216,6 +1227,7 @@ function generateTeams() {
     }
   });
 
+  // Fill remaining slots — prioritize positions that the team still needs
   const remaining = all.filter(p => !assigned.has(p.id)).sort((a, b) => b.ovr - a.ovr);
   for (const player of remaining) {
     const eligible = Array.from({length: numTeams}, (_, i) => i)
@@ -1223,10 +1235,23 @@ function generateTeams() {
       .sort((a, b) => { if (teamStarters(a) !== teamStarters(b)) return teamStarters(a) - teamStarters(b); return teamTotal(a) - teamTotal(b); });
     if (eligible.length === 0) break;
     const ti = eligible[0];
+
+    // Find best position: prioritize positions the team needs most (has 0 of)
+    // then positions under limit, skipping Goleiro if team already has enough
     let bestPos = 'Linha';
+    const playerPos = player.positions.filter(p => p !== 'Goleiro' || posCount(ti, 'Goleiro') < (posLimits['Goleiro'] || 0));
+
+    // First try: positions with 0 players on this team
     for (const pos of POSITIONS) {
-      if (player.positions.includes(pos) && posCount(ti, pos) < (posLimits[pos] || 0)) { bestPos = pos; break; }
+      if (playerPos.includes(pos) && posCount(ti, pos) === 0 && (posLimits[pos] || 0) > 0) { bestPos = pos; break; }
     }
+    // Second try: any position under limit
+    if (bestPos === 'Linha') {
+      for (const pos of POSITIONS) {
+        if (playerPos.includes(pos) && posCount(ti, pos) < (posLimits[pos] || 0)) { bestPos = pos; break; }
+      }
+    }
+
     player.assignedPos = bestPos;
     player.isBench = false;
     teams[ti].push(player);
