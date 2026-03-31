@@ -682,7 +682,7 @@ function openModal(player = null) {
     const regLog = JSON.parse(localStorage.getItem('fdg_confirm_regs') || '[]');
     const now = Date.now();
     const recent = regLog.filter(t => now - t < 24 * 60 * 60 * 1000);
-    if (recent.length >= 4) {
+    if (recent.length >= 10) {
       showToast('Limite de 4 cadastros em 24h atingido');
       return;
     }
