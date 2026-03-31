@@ -239,7 +239,7 @@ input:focus, select:focus, textarea:focus { border-color: var(--highlight); }
         <div class="config-row">
           <label>Cobrar dos goleiros?</label>
           <select id="cfg-charge-gk" style="width:100px;padding:8px;border:2px solid var(--accent);border-radius:8px;background:var(--card);color:var(--text);font-size:0.9rem">
-            <option value="false">Nao</option>
+            <option value="false">Não</option>
             <option value="true">Sim</option>
           </select>
         </div>
@@ -251,7 +251,7 @@ input:focus, select:focus, textarea:focus { border-color: var(--highlight); }
           </select>
         </div>
         <div class="form-group" style="margin-top:12px">
-          <label>Valor total do jogo (R$)</label>
+          <label id="cfg-cost-label">Valor total do jogo (R$)</label>
           <input type="number" id="cfg-cost-value" min="0" step="0.01" value="0" style="width:120px;padding:8px;border:2px solid var(--accent);border-radius:8px;background:var(--card);color:var(--text);font-size:1rem;text-align:center">
         </div>
       </div>
@@ -682,7 +682,10 @@ function renderConfirmed() {
   // Goleiro is mandatory: always need exactly numTeams goleiros
   const goleiros = posCounts['Goleiro'] || 0;
   if (goleiros < numTeams) {
-    alertHtml += `<div style="background:#5a1a2a;border-radius:var(--radius);padding:12px;margin-bottom:12px;font-size:0.85rem;font-weight:700;color:var(--highlight)">FALTAM ${numTeams - goleiros} GOLEIRO${numTeams - goleiros > 1 ? 'S' : ''}! (${goleiros}/${numTeams} confirmados)</div>`;
+    const faltam = numTeams - goleiros;
+    const faltaVerb = faltam === 1 ? 'FALTA' : 'FALTAM';
+    const golPlural = faltam === 1 ? 'GOLEIRO' : 'GOLEIROS';
+    alertHtml += `<div style="background:#5a1a2a;border-radius:var(--radius);padding:12px;margin-bottom:12px;font-size:0.85rem;font-weight:700;color:var(--highlight)">${faltaVerb} ${faltam} ${golPlural}! (${goleiros}/${numTeams} confirmados)</div>`;
   }
 
   // Check other positions - informational
@@ -696,7 +699,7 @@ function renderConfirmed() {
     }
   });
   if (missing.length > 0) {
-    alertHtml += `<div style="background:var(--accent);border-radius:var(--radius);padding:10px;margin-bottom:12px;font-size:0.8rem;color:#f39c12">Posicoes com poucos jogadores: ${missing.join(' | ')}</div>`;
+    alertHtml += `<div style="background:var(--accent);border-radius:var(--radius);padding:10px;margin-bottom:12px;font-size:0.8rem;color:#f39c12">Posições com poucos jogadores: ${missing.join(' | ')}</div>`;
   }
 
   let cardsHtml = confirmed.map(p => {
@@ -966,7 +969,14 @@ function initConfig() {
   document.getElementById('cfg-charge-gk').value = config.charge_goalkeepers ? 'true' : 'false';
   document.getElementById('cfg-cost-type').value = config.game_cost_type || 'fixo';
   document.getElementById('cfg-cost-value').value = config.game_cost_value || 0;
+  updateCostLabel();
 }
+
+function updateCostLabel() {
+  const type = document.getElementById('cfg-cost-type').value;
+  document.getElementById('cfg-cost-label').textContent = type === 'fixo' ? 'Valor fixo por jogador (R$)' : 'Valor total do jogo (R$)';
+}
+document.getElementById('cfg-cost-type').addEventListener('change', updateCostLabel);
 
 // Config change handlers (debounced save)
 let cfgTimer = null;
@@ -1009,6 +1019,10 @@ document.getElementById('panel-config').addEventListener('input', e => {
 document.getElementById('panel-config').addEventListener('change', saveConfig);
 
 // ---- PAYMENT RENDER ----
+function formatMoney(v) {
+  return 'R$ ' + v.toFixed(2).replace('.', ',').replace(/\B(?=(\d{3})+(?!\d))/g, '.');
+}
+
 function renderPayment() {
   const pixDisplay = document.getElementById('pix-display');
   const paymentList = document.getElementById('payment-list');
@@ -1020,7 +1034,7 @@ function renderPayment() {
   const costType = config.game_cost_type || 'fixo';
   const totalCost = config.game_cost_value || 0;
 
-  const typeLabels = {aleatoria:'Chave aleatoria', cpf:'CPF', telefone:'Telefone', email:'E-mail'};
+  const typeLabels = {aleatoria:'Chave aleatória', cpf:'CPF', telefone:'Telefone', email:'E-mail'};
 
   let pixHtml = '';
   if (pixKey) {
@@ -1033,7 +1047,7 @@ function renderPayment() {
       </div>
     </div>`;
   } else {
-    pixHtml = `<div class="empty"><p>Chave Pix nao configurada.<br>Configure em Config.</p></div>`;
+    pixHtml = `<div class="empty"><p>Chave Pix não configurada.<br>Configure em Config.</p></div>`;
   }
   pixDisplay.innerHTML = pixHtml;
 
@@ -1067,29 +1081,44 @@ function renderPayment() {
 
   const totalArrecadado = costType === 'fixo' ? perPerson * numPayers : totalCost;
 
-  let html = `<div class="team-block">
-    <div class="team-header">
-      <span class="team-title">Cobranca</span>
-      <span class="team-overall">${costType === 'fixo' ? 'Fixo' : 'Rateio'}</span>
-    </div>
-    <div style="display:flex;justify-content:space-between;padding:8px 0;border-bottom:1px solid rgba(255,255,255,0.1);font-size:0.85rem">
-      <span style="color:var(--muted)">Valor total do jogo</span>
-      <span style="font-weight:700">${costType === 'fixo' ? 'R$ ' + totalArrecadado.toFixed(2) : 'R$ ' + totalCost.toFixed(2)}</span>
-    </div>
-    <div style="display:flex;justify-content:space-between;padding:8px 0;border-bottom:1px solid rgba(255,255,255,0.1);font-size:0.85rem">
-      <span style="color:var(--muted)">Pagantes</span>
-      <span style="font-weight:700">${numPayers} jogador${numPayers !== 1 ? 'es' : ''}</span>
-    </div>
-    <div style="display:flex;justify-content:space-between;padding:8px 0;font-size:0.85rem">
-      <span style="color:var(--muted)">Valor por pessoa</span>
-      <span style="font-weight:800;color:var(--green);font-size:1.1rem">R$ ${perPerson.toFixed(2)}</span>
-    </div>
-  </div>`;
+  let html = '';
 
-  html += `<div class="team-block"><div class="team-header"><span class="team-title">Jogadores</span><span class="team-overall">${confirmed.length} confirmados</span></div>`;
+  // Summary block: only for admin/editor
+  if (role === 'admin' || role === 'editor') {
+    html += `<div class="team-block">
+      <div class="team-header">
+        <span class="team-title">Cobrança</span>
+        <span class="team-overall">${costType === 'fixo' ? 'Fixo' : 'Rateio'}</span>
+      </div>
+      <div style="display:flex;justify-content:space-between;padding:8px 0;border-bottom:1px solid rgba(255,255,255,0.1);font-size:0.85rem">
+        <span style="color:var(--muted)">Valor total do jogo</span>
+        <span style="font-weight:700">${costType === 'fixo' ? formatMoney(totalArrecadado) : formatMoney(totalCost)}</span>
+      </div>
+      <div style="display:flex;justify-content:space-between;padding:8px 0;border-bottom:1px solid rgba(255,255,255,0.1);font-size:0.85rem">
+        <span style="color:var(--muted)">Pagantes</span>
+        <span style="font-weight:700">${numPayers} jogador${numPayers !== 1 ? 'es' : ''}</span>
+      </div>
+      <div style="display:flex;justify-content:space-between;padding:8px 0;font-size:0.85rem">
+        <span style="color:var(--muted)">Valor por pessoa</span>
+        <span style="font-weight:800;color:var(--green);font-size:1.1rem">${formatMoney(perPerson)}</span>
+      </div>
+    </div>`;
+  }
+
+  // Players list
+  const canTogglePaid = (role === 'admin' || role === 'editor');
+  const paidCount = payers.filter(p => p.paid).length;
+
+  html += `<div class="team-block"><div class="team-header"><span class="team-title">Jogadores</span><span class="team-overall">${paidCount}/${payers.length} pagos</span></div>`;
 
   payers.forEach(p => {
-    html += `<div class="team-player"><span>${esc(p.name)}</span><span style="font-weight:700;color:var(--green)">R$ ${perPerson.toFixed(2)}</span></div>`;
+    const paidTime = p.paid && p.paid_at ? formatConfirmedAt(p.paid_at) : '';
+    const clickAttr = canTogglePaid ? `onclick="togglePaid('${p.id}')" style="cursor:pointer"` : '';
+    if (p.paid) {
+      html += `<div class="team-player" ${clickAttr}><span>${esc(p.name)} ${paidTime ? `<span style="color:var(--muted);font-size:0.7rem">${paidTime}</span>` : ''}</span><span style="font-weight:700;color:var(--green)">PAGO</span></div>`;
+    } else {
+      html += `<div class="team-player" ${clickAttr}><span>${esc(p.name)}</span><span style="font-weight:700;color:var(--highlight)">${role !== 'confirm' ? formatMoney(perPerson) : 'PENDENTE'}</span></div>`;
+    }
   });
 
   if (exempt.length > 0) {
@@ -1101,6 +1130,22 @@ function renderPayment() {
 
   html += `</div>`;
   paymentList.innerHTML = html;
+}
+
+async function togglePaid(id) {
+  if (role !== 'admin' && role !== 'editor') return;
+  const p = players.find(x => x.id === id);
+  if (!p) return;
+  const nowPaid = !p.paid;
+  const body = { paid: nowPaid };
+  if (nowPaid) {
+    body.paid_at = new Date().toISOString();
+  } else {
+    body.paid_at = null;
+  }
+  await supa('players?id=eq.' + id, { method: 'PATCH', body });
+  await reloadPlayers();
+  renderPayment();
 }
 
 function copyPix() {
