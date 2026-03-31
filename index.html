@@ -351,6 +351,15 @@ function startRealtime() {
       ]}},
       ref: String(++realtimeRef)
     }));
+    // Join payment_list channel
+    realtimeWs.send(JSON.stringify({
+      topic: 'realtime:public:payment_list',
+      event: 'phx_join',
+      payload: { config: { broadcast: { self: false }, presence: { key: '' }, postgres_changes: [
+        { event: '*', schema: 'public', table: 'payment_list' }
+      ]}},
+      ref: String(++realtimeRef)
+    }));
     // Heartbeat every 30s
     heartbeatInterval = setInterval(() => {
       if (realtimeWs.readyState === WebSocket.OPEN) {
@@ -1066,7 +1075,15 @@ function formatMoney(v) {
   return 'R$ ' + v.toFixed(2).replace('.', ',').replace(/\B(?=(\d{3})+(?!\d))/g, '.');
 }
 
-function renderPayment() {
+let paymentItems = [];
+
+async function loadPaymentList() {
+  paymentItems = await supa('payment_list?select=*&order=name.asc') || [];
+}
+
+async function renderPayment() {
+  await loadPaymentList();
+
   const pixDisplay = document.getElementById('pix-display');
   const paymentList = document.getElementById('payment-list');
 
@@ -1094,20 +1111,26 @@ function renderPayment() {
   }
   pixDisplay.innerHTML = pixHtml;
 
-  // Payment list
-  const confirmed = players.filter(p => p.confirmed);
-  if (confirmed.length === 0) {
-    paymentList.innerHTML = `<div class="empty"><p>Nenhum jogador confirmado.</p></div>`;
+  // Empty list
+  if (paymentItems.length === 0) {
+    paymentList.innerHTML = `<div class="empty"><p>Nenhum jogador na lista de pagamento.</p></div>`;
+    const actionsDiv = document.getElementById('payment-actions');
+    if (role === 'admin' || role === 'editor') {
+      actionsDiv.innerHTML = `
+        <button class="btn btn-primary" onclick="populatePaymentList()" style="margin-top:8px">Carregar jogadores confirmados</button>
+        <button class="btn btn-secondary" onclick="refreshPaymentList()" style="margin-top:6px">Atualizar</button>`;
+    } else {
+      actionsDiv.innerHTML = `
+        <button class="btn btn-secondary" onclick="refreshPaymentList()" style="margin-top:8px">Atualizar</button>`;
+    }
     return;
   }
 
-  // Calculate who pays
+  // Separate payers and exempt
   const payers = [];
   const exempt = [];
-  confirmed.forEach(p => {
-    const positions = Array.isArray(p.positions) ? p.positions : [];
-    const isGK = positions.includes('Goleiro') && positions.length === 1;
-    if (isGK && !chargeGK) {
+  paymentItems.forEach(p => {
+    if (p.is_goalkeeper && !chargeGK) {
       exempt.push(p);
     } else {
       payers.push(p);
@@ -1121,7 +1144,6 @@ function renderPayment() {
   } else {
     perPerson = numPayers > 0 ? totalCost / numPayers : 0;
   }
-
   const totalArrecadado = costType === 'fixo' ? perPerson * numPayers : totalCost;
 
   let html = '';
@@ -1179,42 +1201,63 @@ function renderPayment() {
   if (role === 'admin' || role === 'editor') {
     actionsDiv.innerHTML = `
       <button class="btn btn-secondary" onclick="refreshPaymentList()" style="margin-top:8px">Atualizar lista</button>
-      <button class="btn btn-danger" onclick="clearPayments()" style="margin-top:6px">Limpar pagamentos</button>`;
+      <button class="btn btn-primary" onclick="populatePaymentList()" style="margin-top:6px">Recarregar dos confirmados</button>
+      <button class="btn btn-danger" onclick="clearPayments()" style="margin-top:6px">Limpar lista</button>`;
   } else {
     actionsDiv.innerHTML = `
-      <button class="btn btn-secondary" onclick="refreshPaymentList()" style="margin-top:8px">Atualizar lista</button>`;
+      <button class="btn btn-secondary" onclick="refreshPaymentList()" style="margin-top:8px">Atualizar</button>`;
   }
 }
 
 async function togglePaid(id) {
   if (role !== 'admin' && role !== 'editor') return;
-  const p = players.find(x => x.id === id);
+  const p = paymentItems.find(x => x.id === id);
   if (!p) return;
   const nowPaid = !p.paid;
   const body = { paid: nowPaid };
-  if (nowPaid) {
-    body.paid_at = new Date().toISOString();
-  } else {
-    body.paid_at = null;
-  }
-  await supa('players?id=eq.' + id, { method: 'PATCH', body });
-  await reloadPlayers();
+  if (nowPaid) { body.paid_at = new Date().toISOString(); }
+  else { body.paid_at = null; }
+  await supa('payment_list?id=eq.' + id, { method: 'PATCH', body });
   renderPayment();
 }
 
+async function populatePaymentList() {
+  if (role !== 'admin' && role !== 'editor') return;
+  // Clear current list
+  await supa('payment_list?id=not.is.null', { method: 'DELETE', prefer: 'return=minimal' });
+  // Add confirmed players
+  const confirmed = players.filter(p => p.confirmed);
+  const chargeGK = config.charge_goalkeepers;
+  const items = confirmed.map(p => {
+    const positions = Array.isArray(p.positions) ? p.positions : [];
+    const isGK = positions.includes('Goleiro') && positions.length === 1;
+    return {
+      id: p.id + '_' + Date.now().toString(36),
+      player_id: p.id,
+      name: p.name,
+      is_goalkeeper: isGK,
+      paid: false,
+      paid_at: null
+    };
+  });
+  if (items.length > 0) {
+    await supa('payment_list', { method: 'POST', body: items });
+  }
+  renderPayment();
+  showToast(items.length + ' jogadores adicionados');
+}
+
 async function refreshPaymentList() {
-  await reloadPlayers();
   renderPayment();
   showToast('Lista atualizada');
 }
 
 async function clearPayments() {
   if (role !== 'admin' && role !== 'editor') return;
-  if (!confirm('Limpar todos os pagamentos?\nA lista será atualizada com os jogadores confirmados.')) return;
-  await supa('players?paid=eq.true', { method: 'PATCH', body: { paid: false, paid_at: null } });
-  await reloadPlayers();
+  if (!confirm('Limpar toda a lista de pagamento?\nTodos os jogadores serão removidos.')) return;
+  await supa('payment_list?id=not.is.null', { method: 'DELETE', prefer: 'return=minimal' });
   renderPayment();
-  showToast('Pagamentos limpos');
+  showToast('Lista limpa');
 }
 
 function copyPix() {
@@ -1406,7 +1449,7 @@ async function clearTeams() {
   if (clear) clear.style.display = 'none';
   await Promise.all([
     supa('teams_state?id=eq.1', { method: 'PATCH', body: { teams_json: null, updated_at: new Date().toISOString() } }),
-    supa('players?paid=eq.true', { method: 'PATCH', body: { paid: false, paid_at: null } })
+    supa('payment_list?id=not.is.null', { method: 'DELETE', prefer: 'return=minimal' })
   ]);
   await reloadPlayers();
   renderPayment();
