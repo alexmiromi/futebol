@@ -188,6 +188,7 @@ input:focus, select:focus, textarea:focus { border-color: var(--highlight); }
     <div id="panel-pagamento" class="panel">
       <div id="pix-display"></div>
       <div id="payment-list"></div>
+      <div id="payment-actions"></div>
     </div>
 
     <!-- CONFIG -->
@@ -865,11 +866,53 @@ async function confirmAll() {
   await reloadPlayers();
 }
 
+let undoBackup = null;
+
 async function unconfirmAll() {
   if (role !== 'admin') { showToast('Somente admin pode desmarcar todos'); return; }
-  // Admin clears everything: confirmed + confirmed_at
+
+  // Ask for PIN again
+  const pin = prompt('Digite o PIN admin para confirmar:');
+  if (pin !== (config.pin_admin || '8312')) {
+    showToast('PIN incorreto');
+    return;
+  }
+
+  // Save backup for undo
+  undoBackup = players.filter(p => p.confirmed).map(p => ({ id: p.id, confirmed_at: p.confirmed_at }));
+
+  // Clear all
   await supa('players?confirmed=eq.true', { method: 'PATCH', body: { confirmed: false, confirmed_at: null } });
   await reloadPlayers();
+  showToast('Todos desmarcados');
+
+  // Show undo button temporarily
+  const confirmBar = document.getElementById('confirm-bar-actions');
+  const undoBtn = document.createElement('button');
+  undoBtn.className = 'btn btn-small btn-primary';
+  undoBtn.textContent = 'Desfazer';
+  undoBtn.onclick = undoUnconfirmAll;
+  undoBtn.id = 'btn-undo-unconfirm';
+  confirmBar.appendChild(undoBtn);
+
+  // Auto-hide undo after 15 seconds
+  setTimeout(() => {
+    const btn = document.getElementById('btn-undo-unconfirm');
+    if (btn) btn.remove();
+    undoBackup = null;
+  }, 15000);
+}
+
+async function undoUnconfirmAll() {
+  if (!undoBackup || undoBackup.length === 0) return;
+  for (const p of undoBackup) {
+    await supa('players?id=eq.' + p.id, { method: 'PATCH', body: { confirmed: true, confirmed_at: p.confirmed_at } });
+  }
+  undoBackup = null;
+  const btn = document.getElementById('btn-undo-unconfirm');
+  if (btn) btn.remove();
+  await reloadPlayers();
+  showToast('Confirmações restauradas');
 }
 
 async function reloadPlayers() {
@@ -1130,6 +1173,17 @@ function renderPayment() {
 
   html += `</div>`;
   paymentList.innerHTML = html;
+
+  // Action buttons
+  const actionsDiv = document.getElementById('payment-actions');
+  if (role === 'admin' || role === 'editor') {
+    actionsDiv.innerHTML = `
+      <button class="btn btn-secondary" onclick="refreshPaymentList()" style="margin-top:8px">Atualizar lista</button>
+      <button class="btn btn-danger" onclick="clearPayments()" style="margin-top:6px">Limpar pagamentos</button>`;
+  } else {
+    actionsDiv.innerHTML = `
+      <button class="btn btn-secondary" onclick="refreshPaymentList()" style="margin-top:8px">Atualizar lista</button>`;
+  }
 }
 
 async function togglePaid(id) {
@@ -1146,6 +1200,21 @@ async function togglePaid(id) {
   await supa('players?id=eq.' + id, { method: 'PATCH', body });
   await reloadPlayers();
   renderPayment();
+}
+
+async function refreshPaymentList() {
+  await reloadPlayers();
+  renderPayment();
+  showToast('Lista atualizada');
+}
+
+async function clearPayments() {
+  if (role !== 'admin' && role !== 'editor') return;
+  if (!confirm('Limpar todos os pagamentos?\nA lista será atualizada com os jogadores confirmados.')) return;
+  await supa('players?paid=eq.true', { method: 'PATCH', body: { paid: false, paid_at: null } });
+  await reloadPlayers();
+  renderPayment();
+  showToast('Pagamentos limpos');
 }
 
 function copyPix() {
