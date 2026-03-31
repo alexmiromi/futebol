@@ -158,6 +158,7 @@ input:focus, select:focus, textarea:focus { border-color: var(--highlight); }
       <button class="tab active" data-tab="jogadores">Jogadores <span id="players-count" class="counter">0</span></button>
       <button class="tab" data-tab="confirmados">Confirmados <span id="confirmed-count" class="counter">0</span></button>
       <button class="tab" data-tab="times">Times</button>
+      <button class="tab" data-tab="pagamento">Pagar</button>
       <button class="tab" data-tab="config">Config</button>
     </div>
 
@@ -181,6 +182,12 @@ input:focus, select:focus, textarea:focus { border-color: var(--highlight); }
       <div id="times-actions"></div>
       <div id="teams-display"></div>
       <button class="btn btn-green" onclick="copyTeams()" id="btn-copy" style="display:none">Copiar para WhatsApp</button>
+    </div>
+
+    <!-- PAGAMENTO -->
+    <div id="panel-pagamento" class="panel">
+      <div id="pix-display"></div>
+      <div id="payment-list"></div>
     </div>
 
     <!-- CONFIG -->
@@ -208,6 +215,45 @@ input:focus, select:focus, textarea:focus { border-color: var(--highlight); }
         <div class="skill-row"><label>Tatico</label><input type="range" min="0" max="10" value="5" data-weight="tatico"><span class="skill-val">5</span></div>
         <div class="skill-row"><label>Posse de bola</label><input type="range" min="0" max="10" value="5" data-weight="posse"><span class="skill-val">5</span></div>
         <div class="skill-row"><label>Toque</label><input type="range" min="0" max="10" value="5" data-weight="toque"><span class="skill-val">5</span></div>
+      </div>
+
+      <div class="weight-section">
+        <h3>Pagamento / Pix</h3>
+        <div class="config-row">
+          <label>Tipo de chave</label>
+          <select id="cfg-pix-type" style="width:140px;padding:8px;border:2px solid var(--accent);border-radius:8px;background:var(--card);color:var(--text);font-size:0.9rem">
+            <option value="aleatoria">Aleatoria</option>
+            <option value="cpf">CPF</option>
+            <option value="telefone">Telefone</option>
+            <option value="email">E-mail</option>
+          </select>
+        </div>
+        <div class="form-group" style="margin-top:12px">
+          <label>Chave Pix</label>
+          <input type="text" id="cfg-pix-key" placeholder="Cole a chave pix aqui" autocomplete="off">
+        </div>
+        <div class="form-group">
+          <label>Nome do titular</label>
+          <input type="text" id="cfg-pix-holder" placeholder="Nome de quem recebe" autocomplete="off">
+        </div>
+        <div class="config-row">
+          <label>Cobrar dos goleiros?</label>
+          <select id="cfg-charge-gk" style="width:100px;padding:8px;border:2px solid var(--accent);border-radius:8px;background:var(--card);color:var(--text);font-size:0.9rem">
+            <option value="false">Nao</option>
+            <option value="true">Sim</option>
+          </select>
+        </div>
+        <div class="config-row">
+          <label>Tipo de cobranca</label>
+          <select id="cfg-cost-type" style="width:140px;padding:8px;border:2px solid var(--accent);border-radius:8px;background:var(--card);color:var(--text);font-size:0.9rem">
+            <option value="fixo">Valor fixo</option>
+            <option value="variavel">Rateio (variavel)</option>
+          </select>
+        </div>
+        <div class="form-group" style="margin-top:12px">
+          <label>Valor total do jogo (R$)</label>
+          <input type="number" id="cfg-cost-value" min="0" step="0.01" value="0" style="width:120px;padding:8px;border:2px solid var(--accent);border-radius:8px;background:var(--card);color:var(--text);font-size:1rem;text-align:center">
+        </div>
       </div>
     </div>
   </div>
@@ -339,7 +385,7 @@ async function reloadAll() {
   reloadDebounce = setTimeout(async () => {
     const [p, c, ts] = await Promise.all([
       supa('players?select=*&order=name.asc'),
-      supa('config?select=num_teams,per_team,pos_limits,weights&id=eq.1'),
+      supa('config?select=*&id=eq.1'),
       supa('teams_state?select=teams_json,updated_at&id=eq.1')
     ]);
     players = p || [];
@@ -347,6 +393,7 @@ async function reloadAll() {
     renderPlayers(document.getElementById('search-input')?.value || '');
     renderConfirmed();
     initConfig();
+    renderPayment();
     // Update teams display from DB
     const teamsData = (ts && ts[0]) ? ts[0].teams_json : null;
     lastTeamsTime = (ts && ts[0]) ? ts[0].updated_at : null;
@@ -460,22 +507,26 @@ function setupRole() {
   const badge = document.getElementById('role-badge');
   const configTab = document.querySelector('[data-tab="config"]');
   const timesTab = document.querySelector('[data-tab="times"]');
+  const pagamentoTab = document.querySelector('[data-tab="pagamento"]');
 
   if (role === 'admin') {
     badge.textContent = 'ADMIN';
     badge.className = 'role-badge role-admin';
     configTab.disabled = false;
     timesTab.disabled = false;
+    pagamentoTab.disabled = false;
   } else if (role === 'editor') {
     badge.textContent = 'EDITOR';
     badge.className = 'role-badge role-editor';
     configTab.disabled = false;
     timesTab.disabled = false;
+    pagamentoTab.disabled = false;
   } else {
     badge.textContent = 'PRESENCA';
     badge.className = 'role-badge role-confirm';
     configTab.disabled = true;
     timesTab.disabled = false;
+    pagamentoTab.disabled = false;
   }
 
   // Build action buttons based on role
@@ -510,7 +561,7 @@ function setupRole() {
 async function loadData() {
   const [p, c, ts] = await Promise.all([
     supa('players?select=*&order=name.asc'),
-    supa('config?select=num_teams,per_team,pos_limits,weights&id=eq.1'),
+    supa('config?select=*&id=eq.1'),
     supa('teams_state?select=teams_json,updated_at&id=eq.1')
   ]);
   players = p || [];
@@ -528,6 +579,7 @@ async function loadData() {
   renderPlayers();
   renderConfirmed();
   initConfig();
+  renderPayment();
 
   // Render teams if they exist
   if (lastTeams) {
@@ -570,6 +622,7 @@ document.querySelectorAll('.tab').forEach(t => {
     if (t.dataset.tab === 'confirmados') renderConfirmed();
     if (t.dataset.tab === 'jogadores') renderPlayers();
     if (t.dataset.tab === 'times') removeTimesHighlight();
+    if (t.dataset.tab === 'pagamento') renderPayment();
   });
 });
 
@@ -905,6 +958,14 @@ function initConfig() {
     r.value = w[r.dataset.weight] || 5;
     r.nextElementSibling.textContent = r.value;
   });
+
+  // Payment config
+  document.getElementById('cfg-pix-type').value = config.pix_type || 'aleatoria';
+  document.getElementById('cfg-pix-key').value = config.pix_key || '';
+  document.getElementById('cfg-pix-holder').value = config.pix_holder || '';
+  document.getElementById('cfg-charge-gk').value = config.charge_goalkeepers ? 'true' : 'false';
+  document.getElementById('cfg-cost-type').value = config.game_cost_type || 'fixo';
+  document.getElementById('cfg-cost-value').value = config.game_cost_value || 0;
 }
 
 // Config change handlers (debounced save)
@@ -925,9 +986,18 @@ function saveConfig() {
     config.per_team = parseInt(document.getElementById('cfg-per-team').value) || 7;
     config.pos_limits = posLimits;
     config.weights = weights;
+    config.pix_type = document.getElementById('cfg-pix-type').value;
+    config.pix_key = document.getElementById('cfg-pix-key').value.trim();
+    config.pix_holder = document.getElementById('cfg-pix-holder').value.trim();
+    config.charge_goalkeepers = document.getElementById('cfg-charge-gk').value === 'true';
+    config.game_cost_type = document.getElementById('cfg-cost-type').value;
+    config.game_cost_value = parseFloat(document.getElementById('cfg-cost-value').value) || 0;
     await supa('config?id=eq.1', { method: 'PATCH', body: {
       num_teams: config.num_teams, per_team: config.per_team,
-      pos_limits: posLimits, weights
+      pos_limits: posLimits, weights,
+      pix_type: config.pix_type, pix_key: config.pix_key, pix_holder: config.pix_holder,
+      charge_goalkeepers: config.charge_goalkeepers,
+      game_cost_type: config.game_cost_type, game_cost_value: config.game_cost_value
     }});
   }, 500);
 }
@@ -937,6 +1007,118 @@ document.getElementById('panel-config').addEventListener('input', e => {
   saveConfig();
 });
 document.getElementById('panel-config').addEventListener('change', saveConfig);
+
+// ---- PAYMENT RENDER ----
+function renderPayment() {
+  const pixDisplay = document.getElementById('pix-display');
+  const paymentList = document.getElementById('payment-list');
+
+  const pixType = config.pix_type || 'aleatoria';
+  const pixKey = config.pix_key || '';
+  const pixHolder = config.pix_holder || '';
+  const chargeGK = config.charge_goalkeepers;
+  const costType = config.game_cost_type || 'fixo';
+  const totalCost = config.game_cost_value || 0;
+
+  const typeLabels = {aleatoria:'Chave aleatoria', cpf:'CPF', telefone:'Telefone', email:'E-mail'};
+
+  let pixHtml = '';
+  if (pixKey) {
+    pixHtml = `<div class="team-block" style="border-left:4px solid var(--green)">
+      <div style="text-align:center">
+        <div style="color:var(--muted);font-size:0.75rem;font-weight:600;margin-bottom:4px">${typeLabels[pixType] || 'Pix'}</div>
+        <div style="font-size:1.1rem;font-weight:800;word-break:break-all;margin-bottom:4px">${esc(pixKey)}</div>
+        ${pixHolder ? `<div style="color:var(--muted);font-size:0.85rem;margin-bottom:10px">${esc(pixHolder)}</div>` : ''}
+        <button class="btn btn-green btn-small" onclick="copyPix()" style="width:100%">Copiar chave Pix</button>
+      </div>
+    </div>`;
+  } else {
+    pixHtml = `<div class="empty"><p>Chave Pix nao configurada.<br>Configure em Config.</p></div>`;
+  }
+  pixDisplay.innerHTML = pixHtml;
+
+  // Payment list
+  const confirmed = players.filter(p => p.confirmed);
+  if (confirmed.length === 0) {
+    paymentList.innerHTML = `<div class="empty"><p>Nenhum jogador confirmado.</p></div>`;
+    return;
+  }
+
+  // Calculate who pays
+  const payers = [];
+  const exempt = [];
+  confirmed.forEach(p => {
+    const positions = Array.isArray(p.positions) ? p.positions : [];
+    const isGK = positions.includes('Goleiro') && positions.length === 1;
+    if (isGK && !chargeGK) {
+      exempt.push(p);
+    } else {
+      payers.push(p);
+    }
+  });
+
+  const numPayers = payers.length;
+  let perPerson = 0;
+  if (costType === 'fixo') {
+    perPerson = totalCost;
+  } else {
+    perPerson = numPayers > 0 ? totalCost / numPayers : 0;
+  }
+
+  const totalArrecadado = costType === 'fixo' ? perPerson * numPayers : totalCost;
+
+  let html = `<div class="team-block">
+    <div class="team-header">
+      <span class="team-title">Cobranca</span>
+      <span class="team-overall">${costType === 'fixo' ? 'Fixo' : 'Rateio'}</span>
+    </div>
+    <div style="display:flex;justify-content:space-between;padding:8px 0;border-bottom:1px solid rgba(255,255,255,0.1);font-size:0.85rem">
+      <span style="color:var(--muted)">Valor total do jogo</span>
+      <span style="font-weight:700">${costType === 'fixo' ? 'R$ ' + totalArrecadado.toFixed(2) : 'R$ ' + totalCost.toFixed(2)}</span>
+    </div>
+    <div style="display:flex;justify-content:space-between;padding:8px 0;border-bottom:1px solid rgba(255,255,255,0.1);font-size:0.85rem">
+      <span style="color:var(--muted)">Pagantes</span>
+      <span style="font-weight:700">${numPayers} jogador${numPayers !== 1 ? 'es' : ''}</span>
+    </div>
+    <div style="display:flex;justify-content:space-between;padding:8px 0;font-size:0.85rem">
+      <span style="color:var(--muted)">Valor por pessoa</span>
+      <span style="font-weight:800;color:var(--green);font-size:1.1rem">R$ ${perPerson.toFixed(2)}</span>
+    </div>
+  </div>`;
+
+  html += `<div class="team-block"><div class="team-header"><span class="team-title">Jogadores</span><span class="team-overall">${confirmed.length} confirmados</span></div>`;
+
+  payers.forEach(p => {
+    html += `<div class="team-player"><span>${esc(p.name)}</span><span style="font-weight:700;color:var(--green)">R$ ${perPerson.toFixed(2)}</span></div>`;
+  });
+
+  if (exempt.length > 0) {
+    html += `<hr class="team-separator">`;
+    exempt.forEach(p => {
+      html += `<div class="team-player bench"><span>${esc(p.name)} <span class="team-player-pos">GOL</span></span><span style="color:var(--muted);font-size:0.8rem">Isento</span></div>`;
+    });
+  }
+
+  html += `</div>`;
+  paymentList.innerHTML = html;
+}
+
+function copyPix() {
+  const key = config.pix_key || '';
+  if (!key) return;
+  if (navigator.clipboard && navigator.clipboard.writeText) {
+    navigator.clipboard.writeText(key).then(() => showToast('Chave Pix copiada!')).catch(() => fallbackCopy(key));
+  } else {
+    const ta = document.createElement('textarea');
+    ta.value = key;
+    ta.style.cssText = 'position:fixed;opacity:0';
+    document.body.appendChild(ta);
+    ta.select();
+    document.execCommand('copy');
+    document.body.removeChild(ta);
+    showToast('Chave Pix copiada!');
+  }
+}
 
 // ---- TEAM GENERATION ----
 function generateTeams() {
