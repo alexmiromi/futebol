@@ -1327,6 +1327,7 @@ function generateTeams() {
 }
 
 async function clearTeams() {
+  if (!confirm('Tem certeza?\nIsso vai limpar os times E os pagamentos.')) return;
   lastTeams = null;
   document.getElementById('teams-display').innerHTML = '<div class="empty"><p>Times limpos. Sorteie novamente.</p></div>';
   document.getElementById('btn-copy').style.display = 'none';
@@ -1334,7 +1335,12 @@ async function clearTeams() {
   const clear = document.getElementById('btn-clear');
   if (reshuffle) reshuffle.style.display = 'none';
   if (clear) clear.style.display = 'none';
-  await supa('teams_state?id=eq.1', { method: 'PATCH', body: { teams_json: null, updated_at: new Date().toISOString() } });
+  await Promise.all([
+    supa('teams_state?id=eq.1', { method: 'PATCH', body: { teams_json: null, updated_at: new Date().toISOString() } }),
+    supa('players?paid=eq.true', { method: 'PATCH', body: { paid: false, paid_at: null } })
+  ]);
+  await reloadPlayers();
+  renderPayment();
 }
 
 function notifyTeamsSorted() {
