@@ -308,7 +308,11 @@ function supa(path, opts = {}) {
     method: opts.method || 'GET',
     headers,
     body: opts.body ? JSON.stringify(opts.body) : undefined
-  }).then(r => r.json());
+  }).then(r => {
+    const ct = r.headers.get('content-length');
+    if (r.status === 204 || ct === '0') return null;
+    return r.json().catch(() => null);
+  });
 }
 
 // ---- SUPABASE REALTIME ----
