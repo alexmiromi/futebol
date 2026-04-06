@@ -712,6 +712,8 @@ function renderConfirmed() {
     alertHtml += `<div style="background:var(--accent);border-radius:var(--radius);padding:10px;margin-bottom:12px;font-size:0.8rem;color:#f39c12">Posições com poucos jogadores: ${missing.join(' | ')}</div>`;
   }
 
+  const nTeams = config.num_teams || 2;
+
   let cardsHtml = confirmed.map(p => {
     const initials = p.name.split(' ').map(w => w[0]).join('').slice(0,2).toUpperCase();
     const ovr = calcOverall(p);
@@ -722,11 +724,30 @@ function renderConfirmed() {
     if (role === 'admin' || role === 'editor') {
       actionBtns += `<button class="icon-btn edit" onclick="editPlayer('${p.id}')">&#9998;</button>`;
     }
+
+    // Force controls (admin/editor only)
+    let forceHtml = '';
+    if (role === 'admin' || role === 'editor') {
+      const isBench = p.force_bench;
+      const forcedTeam = p.force_team;
+
+      let teamOptions = `<option value="-1" ${forcedTeam == null ? 'selected' : ''}>Auto</option>`;
+      for (let t = 0; t < nTeams; t++) {
+        teamOptions += `<option value="${t}" ${forcedTeam === t ? 'selected' : ''}>${TEAM_NAMES[t]}</option>`;
+      }
+
+      forceHtml = `<div style="display:flex;gap:6px;align-items:center;margin-top:6px;flex-wrap:wrap">
+        <button class="btn-small ${isBench ? 'btn-primary' : 'btn-outline'}" style="padding:4px 10px;font-size:0.7rem;border-radius:12px;border:1px solid ${isBench ? 'var(--highlight)' : 'var(--accent)'};background:${isBench ? 'var(--highlight)' : 'transparent'};color:${isBench ? '#fff' : 'var(--muted)'};cursor:pointer" onclick="toggleForceBench('${p.id}')">BANCO</button>
+        <select onchange="setForceTeam('${p.id}', this.value)" style="padding:4px 8px;font-size:0.7rem;border-radius:12px;border:1px solid var(--accent);background:var(--card);color:var(--text)">${teamOptions}</select>
+      </div>`;
+    }
+
     return `<div class="player-card confirmed">
       <div class="player-avatar" onclick="toggleConfirm('${p.id}')" style="cursor:pointer">${initials}</div>
-      <div class="player-info" onclick="toggleConfirm('${p.id}')" style="cursor:pointer">
-        <div class="player-name">${esc(p.name)}</div>
+      <div class="player-info">
+        <div class="player-name" onclick="toggleConfirm('${p.id}')" style="cursor:pointer">${esc(p.name)}</div>
         <div class="player-meta">${esc(posStr)}${role !== 'confirm' ? ' | OVR ' + ovr : ''}${confirmTime ? ' | ' + confirmTime : ''}</div>
+        ${forceHtml}
       </div>
       <div class="player-actions">${actionBtns}</div>
     </div>`;
@@ -863,6 +884,24 @@ async function toggleConfirm(id) {
   await reloadPlayers();
 }
 
+async function toggleForceBench(id) {
+  if (role !== 'admin' && role !== 'editor') return;
+  const p = players.find(x => x.id === id);
+  if (!p) return;
+  const newVal = !p.force_bench;
+  await supa('players?id=eq.' + id, { method: 'PATCH', body: { force_bench: newVal, force_team: null } });
+  await reloadPlayers();
+}
+
+async function setForceTeam(id, val) {
+  if (role !== 'admin' && role !== 'editor') return;
+  const teamIdx = parseInt(val);
+  const body = { force_team: teamIdx >= 0 ? teamIdx : null };
+  if (teamIdx >= 0) body.force_bench = false;
+  await supa('players?id=eq.' + id, { method: 'PATCH', body });
+  await reloadPlayers();
+}
+
 async function confirmAll() {
   // Set confirmed_at only for those who don't have one yet
   const toConfirm = players.filter(p => !p.confirmed);
@@ -891,7 +930,7 @@ async function unconfirmAll() {
   undoBackup = players.filter(p => p.confirmed).map(p => ({ id: p.id, confirmed_at: p.confirmed_at }));
 
   // Clear all
-  await supa('players?confirmed=eq.true', { method: 'PATCH', body: { confirmed: false, confirmed_at: null } });
+  await supa('players?confirmed=eq.true', { method: 'PATCH', body: { confirmed: false, confirmed_at: null, force_bench: false, force_team: null } });
   await reloadPlayers();
   showToast('Todos desmarcados');
 
@@ -1113,16 +1152,8 @@ async function renderPayment() {
 
   // Empty list
   if (paymentItems.length === 0) {
-    paymentList.innerHTML = `<div class="empty"><p>Nenhum jogador na lista de pagamento.</p></div>`;
-    const actionsDiv = document.getElementById('payment-actions');
-    if (role === 'admin' || role === 'editor') {
-      actionsDiv.innerHTML = `
-        <button class="btn btn-primary" onclick="populatePaymentList()" style="margin-top:8px">Carregar jogadores confirmados</button>
-        <button class="btn btn-secondary" onclick="refreshPaymentList()" style="margin-top:6px">Atualizar</button>`;
-    } else {
-      actionsDiv.innerHTML = `
-        <button class="btn btn-secondary" onclick="refreshPaymentList()" style="margin-top:8px">Atualizar</button>`;
-    }
+    paymentList.innerHTML = `<div class="empty"><p>Nenhum jogador na lista de pagamento.<br>Sorteie os times para gerar a lista.</p></div>`;
+    document.getElementById('payment-actions').innerHTML = '';
     return;
   }
 
@@ -1200,12 +1231,9 @@ async function renderPayment() {
   const actionsDiv = document.getElementById('payment-actions');
   if (role === 'admin' || role === 'editor') {
     actionsDiv.innerHTML = `
-      <button class="btn btn-secondary" onclick="refreshPaymentList()" style="margin-top:8px">Atualizar lista</button>
-      <button class="btn btn-primary" onclick="populatePaymentList()" style="margin-top:6px">Recarregar dos confirmados</button>
-      <button class="btn btn-danger" onclick="clearPayments()" style="margin-top:6px">Limpar lista</button>`;
+      <button class="btn btn-danger" onclick="clearPayments()" style="margin-top:8px">Limpar lista</button>`;
   } else {
-    actionsDiv.innerHTML = `
-      <button class="btn btn-secondary" onclick="refreshPaymentList()" style="margin-top:8px">Atualizar</button>`;
+    actionsDiv.innerHTML = '';
   }
 }
 
@@ -1245,11 +1273,6 @@ async function populatePaymentList() {
   }
   renderPayment();
   showToast(items.length + ' jogadores adicionados');
-}
-
-async function refreshPaymentList() {
-  renderPayment();
-  showToast('Lista atualizada');
 }
 
 async function clearPayments() {
@@ -1292,6 +1315,7 @@ function generateTeams() {
 
   const all = confirmed.map(p => ({...p, positions: Array.isArray(p.positions) ? p.positions : [], ovr: calcOverall(p), isBench: false}));
 
+  // Shuffle for randomness
   for (let i = all.length - 1; i > 0; i--) {
     const j = Math.floor(Math.random() * (i + 1));
     [all[i], all[j]] = [all[j], all[i]];
@@ -1305,6 +1329,22 @@ function generateTeams() {
   function teamTotal(ti) { return teams[ti].filter(p => !p.isBench).reduce((s, p) => s + p.ovr, 0); }
   function teamStarters(ti) { return teams[ti].filter(p => !p.isBench).length; }
 
+  // Phase 0: Force players to specific teams first
+  all.filter(p => p.force_team != null && p.force_team >= 0 && p.force_team < numTeams && !p.force_bench).forEach(player => {
+    const ti = player.force_team;
+    if (teamStarters(ti) >= perTeam) return;
+    const playerPos = player.positions;
+    let bestPos = 'Linha';
+    for (const pos of POSITIONS) {
+      if (playerPos.includes(pos) && posCount(ti, pos) < (posLimits[pos] || 0)) { bestPos = pos; break; }
+    }
+    player.assignedPos = bestPos;
+    player.isBench = false;
+    teams[ti].push(player);
+    if (bestPos !== 'Linha') teamPosCounts[ti][bestPos] = (teamPosCounts[ti][bestPos] || 0) + 1;
+    assigned.add(player.id);
+  });
+
   POSITIONS.forEach(pos => {
     const limit = posLimits[pos] || 0;
     if (limit === 0) return;
@@ -1313,11 +1353,11 @@ function generateTeams() {
     // then multi-position players as fallback
     let candidates;
     if (pos === 'Goleiro') {
-      const onlyGK = all.filter(p => !assigned.has(p.id) && p.positions.includes(pos) && p.positions.length === 1).sort((a, b) => b.ovr - a.ovr);
-      const multiGK = all.filter(p => !assigned.has(p.id) && p.positions.includes(pos) && p.positions.length > 1).sort((a, b) => b.ovr - a.ovr);
+      const onlyGK = all.filter(p => !assigned.has(p.id) && !p.force_bench && p.positions.includes(pos) && p.positions.length === 1).sort((a, b) => b.ovr - a.ovr);
+      const multiGK = all.filter(p => !assigned.has(p.id) && !p.force_bench && p.positions.includes(pos) && p.positions.length > 1).sort((a, b) => b.ovr - a.ovr);
       candidates = [...onlyGK, ...multiGK];
     } else {
-      candidates = all.filter(p => !assigned.has(p.id) && p.positions.includes(pos)).sort((a, b) => b.ovr - a.ovr);
+      candidates = all.filter(p => !assigned.has(p.id) && !p.force_bench && p.positions.includes(pos)).sort((a, b) => b.ovr - a.ovr);
     }
 
     for (let round = 0; round < limit; round++) {
@@ -1340,7 +1380,7 @@ function generateTeams() {
   });
 
   // Fill remaining slots — prioritize positions that the team still needs
-  const remaining = all.filter(p => !assigned.has(p.id)).sort((a, b) => b.ovr - a.ovr);
+  const remaining = all.filter(p => !assigned.has(p.id) && !p.force_bench).sort((a, b) => b.ovr - a.ovr);
   for (const player of remaining) {
     const eligible = Array.from({length: numTeams}, (_, i) => i)
       .filter(ti => teamStarters(ti) < perTeam)
@@ -1371,7 +1411,13 @@ function generateTeams() {
     assigned.add(player.id);
   }
 
-  const benchPlayers = all.filter(p => !assigned.has(p.id)).sort((a, b) => a.ovr - b.ovr);
+  // Force bench players + remaining unassigned
+  const benchPlayers = all.filter(p => !assigned.has(p.id)).sort((a, b) => {
+    // Forced bench first, then by ovr ascending
+    if (a.force_bench && !b.force_bench) return -1;
+    if (!a.force_bench && b.force_bench) return 1;
+    return a.ovr - b.ovr;
+  });
   const midpoint = Math.floor(benchPlayers.length / 2);
   for (let i = midpoint; i < benchPlayers.length; i++) {
     const j = midpoint + Math.floor(Math.random() * (benchPlayers.length - midpoint));
@@ -1436,6 +1482,8 @@ function generateTeams() {
   showToast('Times sorteados!');
   // Save to DB so all devices see it
   supa('teams_state?id=eq.1', { method: 'PATCH', body: { teams_json: teams, updated_at: lastTeamsTime } });
+  // Auto-populate payment list
+  populatePaymentList();
 }
 
 async function clearTeams() {
