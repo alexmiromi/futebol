@@ -58,8 +58,11 @@ input:focus, select:focus, textarea:focus { border-color: var(--highlight); }
 .btn-small { width: auto; padding: 8px 16px; font-size: 0.85rem; margin: 0; }
 .btn-outline { background: transparent; border: 2px solid var(--accent); color: var(--muted); }
 .btn-danger { background: #5a1a2a; color: var(--highlight); }
-.player-card { background: var(--card); border-radius: var(--radius); padding: 14px; margin-bottom: 10px; display: flex; align-items: center; gap: 12px; transition: all 0.2s; position: relative; }
+.player-card { background: var(--card); border-radius: var(--radius); padding: 14px; margin-bottom: 10px; display: flex; align-items: center; gap: 12px; transition: all 0.2s; position: relative; overflow: hidden; }
 .player-card.confirmed { border-left: 4px solid var(--green); }
+.player-card.updating { opacity: 0.65; }
+.player-card.updating::after { content: ''; position: absolute; inset: 0; background: linear-gradient(90deg, transparent 0%, rgba(255,255,255,0.09) 50%, transparent 100%); background-size: 200% 100%; animation: card-shimmer 0.9s linear infinite; pointer-events: none; border-radius: var(--radius); }
+@keyframes card-shimmer { 0% { background-position: 200% 0; } 100% { background-position: -200% 0; } }
 .player-avatar { width: 44px; height: 44px; border-radius: 50%; background: var(--accent); display: flex; align-items: center; justify-content: center; font-weight: 700; font-size: 1.1rem; flex-shrink: 0; }
 .player-info { flex: 1; min-width: 0; }
 .player-name { font-weight: 700; font-size: 0.95rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
@@ -662,7 +665,7 @@ function renderPlayers(filter = '') {
       actionBtns += `<button class="icon-btn delete" onclick="deletePlayer('${p.id}')">&#10005;</button>`;
     }
 
-    return `<div class="player-card ${p.confirmed ? 'confirmed' : ''}">
+    return `<div class="player-card ${p.confirmed ? 'confirmed' : ''}" data-player-id="${p.id}">
       <div class="player-avatar" onclick="toggleConfirm('${p.id}')" style="cursor:pointer">${initials}</div>
       <div class="player-info" onclick="toggleConfirm('${p.id}')" style="cursor:pointer">
         <div class="player-name">${esc(p.name)}</div>
@@ -746,7 +749,7 @@ function renderConfirmed() {
       </div>`;
     }
 
-    return `<div class="player-card confirmed">
+    return `<div class="player-card confirmed" data-player-id="${p.id}">
       <div class="player-avatar" onclick="toggleConfirm('${p.id}')" style="cursor:pointer">${initials}</div>
       <div class="player-info">
         <div class="player-name" onclick="toggleConfirm('${p.id}')" style="cursor:pointer">${esc(p.name)}</div>
@@ -876,6 +879,7 @@ async function deletePlayer(id) {
 async function toggleConfirm(id) {
   const p = players.find(x => x.id === id);
   if (!p) return;
+  document.querySelectorAll(`.player-card[data-player-id="${id}"]`).forEach(el => el.classList.add('updating'));
   const nowConfirming = !p.confirmed;
   const body = { confirmed: nowConfirming };
   // Only set confirmed_at when confirming AND there's no existing timestamp
